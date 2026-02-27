@@ -2,8 +2,11 @@
 # TheLook E-Commerce : Profitability & Return Rate Audit 📊
 
 > **Stack :** BigQuery SQL · Looker Studio
+> 
 > **Dataset :** `bigquery-public-data.thelook_ecommerce`
+> 
 > **Période :** Janvier 2025 – Février 2026 (14 mois)
+> 
 > **Catégorie :** Fashion Hoodies & Sweatshirts
 
 ---
