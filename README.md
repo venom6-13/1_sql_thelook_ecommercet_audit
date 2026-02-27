@@ -112,7 +112,7 @@ left join retention_monthly r using (annee, mois)
 order by f.annee, f.mois, f.country;
 ```
 
-> Code complet → [`/sql/01_main_monthly.sql`](sql/01_main_monthly.sql)
+> Code complet → [`/sql/01_main_monthly.sql`](01_main_monthly.sql)
 
 ---
 
