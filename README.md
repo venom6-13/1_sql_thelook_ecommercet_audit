@@ -1,8 +1,6 @@
 # 1_sql_thelook_ecommerce
 # TheLook E-Commerce : Profitability & Return Rate Audit 📊
 
-![Dashboard Preview](assets/dashboard_preview.png)
-
 > **Stack :** BigQuery SQL · Google Sheets  
 > **Dataset :** `bigquery-public-data.thelook_ecommerce`  
 > **Période :** Janvier 2025 – Février 2026 (14 mois)  
@@ -316,17 +314,7 @@ le montre ponctuellement, sans qu'on ait identifié la cause.
 
 ---
 
-## 4. 📈 Live Demo — Dashboard Interactif
-
-> 🔗 **[Accéder au Dashboard →](https://your-dashboard-link.com)**
-
-![Executive Summary](assets/executive_summary.png)
-![Analyse des Retours](assets/returns_analysis.png)
-![Segmentation Genre & Géographie](assets/segments.png)
-
----
-
-## 5. 📁 Structure du Repository
+## 4. 📁 Structure du Repository
 
 ```
 thelook-ecommerce-audit/
@@ -340,11 +328,6 @@ thelook-ecommerce-audit/
 │   ├── 06_china_focus.sql          # Focus marché chinois
 │   └── 07_japan_brazil.sql         # Marchés à fort potentiel anti-retours
 │
-├── assets/
-│   ├── dashboard_preview.png
-│   ├── executive_summary.png
-│   ├── returns_analysis.png
-│   └── segments.png
 │
 └── README.md
 ```
