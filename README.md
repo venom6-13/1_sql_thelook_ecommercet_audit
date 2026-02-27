@@ -1,17 +1,17 @@
 # 1_sql_thelook_ecommerce
 # TheLook E-Commerce : Profitability & Return Rate Audit 📊
 
-> **Stack :** BigQuery SQL · Google Sheets  
-> **Dataset :** `bigquery-public-data.thelook_ecommerce`  
-> **Période :** Janvier 2025 – Février 2026 (14 mois)  
+> **Stack :** BigQuery SQL · Looker Studio
+> **Dataset :** `bigquery-public-data.thelook_ecommerce`
+> **Période :** Janvier 2025 – Février 2026 (14 mois)
 > **Catégorie :** Fashion Hoodies & Sweatshirts
 
 ---
 
-## 1. 🎯 Problématique Métier
+## 1. 🎯 Problématique métier
 
-La direction de **TheLook** observe une anomalie : malgré une croissance du chiffre d'affaires
-de **+163% en 14 mois**, la rentabilité nette ne progresse pas.
+La direction de **TheLook** observe une anomalie : malgré une croissance de
+**+154% de CA et +163% de commandes en 14 mois**, la rentabilité nette ne progresse pas.
 Certains segments génèrent un fort volume de ventes mais une marge faible —
 ils "brassent de l'air" — tandis que les taux de retour restent élevés et érodent
 silencieusement le P&L.
@@ -27,6 +27,31 @@ silencieusement le P&L.
 
 ### Architecture : 1 CTE par dimension métier
 
+<details>
+<summary>🗺️ Voir l'architecture de la requête</summary>
+
+```graph LR
+    OI[order_items] --> BASE[order_items_base]
+    P[products]     --> BASE
+    O[orders]       --> BASE
+    U[users]        --> BASE
+
+    BASE --> FM[financial_monthly\nCA · marge · retours · AOV]
+    BASE --> SM[sessions_monthly\nSessions · achats]
+    BASE --> RM[retention_monthly\n% clients fidèles]
+
+    FM --> FINAL[Requête finale]
+    SM --> FINAL
+    RM --> FINAL
+```
+
+</details>
+
+### Requête principale — Multi-CTE [par pays]
+
+<details>
+<summary>🛠️ Voir la requête principale multi-CTE</summary>
+
 ```sql
 declare date_debut date default '2025-01-01';
 declare date_fin   date default current_date();
@@ -35,7 +60,6 @@ with order_items_base as (
   -- Source unique de vérité : réconciliation des 4 tables
   select
     oi.order_id,
-    oi.product_id,
     oi.sale_price,
     p.cost,
     oi.status,
@@ -44,9 +68,9 @@ with order_items_base as (
     u.gender,
     u.traffic_source
   from `bigquery-public-data.thelook_ecommerce.order_items` oi
-  left join `bigquery-public-data.thelook_ecommerce.products`  p on p.id        = oi.product_id
-  left join `bigquery-public-data.thelook_ecommerce.orders`    o on o.order_id  = oi.order_id
-  left join `bigquery-public-data.thelook_ecommerce.users`     u on u.id        = o.user_id
+  left join `bigquery-public-data.thelook_ecommerce.products`  p on p.id       = oi.product_id
+  left join `bigquery-public-data.thelook_ecommerce.orders`    o on o.order_id = oi.order_id
+  left join `bigquery-public-data.thelook_ecommerce.users`     u on u.id       = o.user_id
   where oi.status in ('Complete', 'Returned')
     and date(o.delivered_at) between date_debut and date_fin
     and p.category = 'Fashion Hoodies & Sweatshirts'
@@ -54,8 +78,8 @@ with order_items_base as (
 
 financial_monthly as (
   select
-    extract(year  from delivered_at)  as annee,
-    extract(month from delivered_at)  as mois,
+    extract(year  from delivered_at) as annee,
+    extract(month from delivered_at) as mois,
     country,
     count(distinct order_id)                                           as nb_commandes,
     count(*)                                                           as nb_articles,
@@ -77,7 +101,7 @@ sessions_monthly as (
   select
     extract(year  from created_at) as annee,
     extract(month from created_at) as mois,
-    count(distinct session_id)     as total_sessions,
+    count(distinct session_id)       as total_sessions,
     countif(event_type = 'purchase') as total_purchases
   from `bigquery-public-data.thelook_ecommerce.events`
   where date(created_at) between date_debut and date_fin
@@ -89,8 +113,7 @@ retention_monthly as (
     extract(year  from o.delivered_at) as annee,
     extract(month from o.delivered_at) as mois,
     round(safe_divide(
-      countif(order_rank > 1),
-      count(*)) * 100, 2)              as taux_retention_pct
+      countif(order_rank > 1), count(*)) * 100, 2) as taux_retention_pct
   from (
     select
       user_id,
@@ -112,7 +135,9 @@ left join retention_monthly r using (annee, mois)
 order by f.annee, f.mois, f.country;
 ```
 
-> Code complet → [`/sql/01_main_monthly.sql`](01_main_monthly.sql)
+</details>
+
+> Code complet → [`/sql/01_main_monthly.sql`](01_main_monthly(by country).sql)
 
 ---
 
@@ -129,7 +154,7 @@ left join `...users`    u on u.id = o.user_id
 
 **Pourquoi `SAFE_DIVIDE` ?**
 ```sql
-round(safe_divide(sum(marge), sum(chiffre_affaires)) * 100, 2)
+round(safe_divide(sum(sale_price - cost), sum(sale_price)) * 100, 2)
 ```
 > En cas de mois sans vente, l'opérateur `/` lève une erreur `Division by zero`
 > et interrompt le pipeline. `SAFE_DIVIDE` retourne `NULL` — le rapport reste
@@ -147,7 +172,7 @@ sum(sale_price - cost)
 ```
 > La marge brute ne reflète pas la réalité opérationnelle. Chaque retour génère
 > des coûts logistiques inverses : transport retour, traitement, reconditionnement.
-
+>
 > ⚠️ **Note méthodologique :** Le dataset TheLook ne contient pas les coûts
 > logistiques réels des retours. Le taux de **15%** est une estimation basée sur
 > les benchmarks industrie : NRF (16.9%), Zalando (12–15%). Quelle que soit
@@ -158,7 +183,7 @@ sum(sale_price - cost)
 
 ### Référentiel des seuils utilisés
 
-| Métrique | Excellent | Acceptable | Préoccupant | Critique |
+| Métrique | 🟢 Excellent | 🟡 Acceptable | 🟠 Préoccupant | 🔴 Critique |
 |---|---|---|---|---|
 | Return Rate | < 15% | 15–25% | 25–35% | > 35% |
 | Marge Brute | > 55% | 45–55% | 35–45% | < 35% |
@@ -166,7 +191,7 @@ sum(sale_price - cost)
 
 ---
 
-## 3. 💡 Insights & Recommandations
+## 3. 💡 Insights & recommandations
 
 ---
 
@@ -176,14 +201,14 @@ sum(sale_price - cost)
 
 | Période | Return Rate | Marge Brute | Marge Nette | Coût Retours |
 |---|---|---|---|---|
-| Jan 2025 | 29.5% 🟠 | 48.4% | 44.0% | ~$145 |
-| Moy. Jan–Oct 2025 | ~28.5% 🟠 | ~48% | ~43.8% | ~$250/mois |
-| Nov–Déc 2025 | ~19% 🟡 | ~48% | ~45.2% | ~$170/mois |
-| Jan–Fév 2026 | ~30% 🟠 | ~48% | ~43.8% | ~$535/mois |
-| **Total période** | **~28% 🟠** | **~48%** | **~44%** | **~$4 290** |
+| Jan 2025 | 29.1% 🟠 | 48.1% | 43.7% | $235 |
+| Fév 2025 | 37.5% 🔴 | 46.9% | 41.2% | $326 |
+| Moy. 2025 | ~29.9% 🟠 | ~47.9% | ~43.3% | ~$296/mois |
+| Fév 2026 | 28.2% 🟠 | 47.6% | 43.4% | $579 |
+| **Total période** | **~30% 🟠** | **~48%** | **~43%** | **~$4 665** |
 
 **Ce que j'en déduis**
-La croissance de +163% du CA n'a pas réduit le return rate d'un seul point.
+La croissance de +154% du CA n'a pas réduit le return rate d'un seul point.
 Plus on vend, plus on retourne — dans les mêmes proportions. Ça suggère un problème
 de fiche produit : les clients reçoivent quelque chose qui ne correspond pas à leurs
 attentes (taille, description, photos).
@@ -201,8 +226,8 @@ affichant un return rate > 35% déclenche une révision avant toute nouvelle cam
 
 | Segment | Marge Brute Moy. | Part du CA | Croissance | Return Rate |
 |---|---|---|---|---|
-| 👩 Femmes | **53% 🟢** | 40% | +153% | ~28% |
-| 👨 Hommes | **45% 🟡** | 60% | +215% | ~27% |
+| 👩 Femmes | **53% 🟢** | 40% | +153% | ~30% |
+| 👨 Hommes | **45% 🟡** | 60% | +215% | ~29% |
 | **Écart** | **8 points** | — | Hommes croissent + vite | — |
 
 **Ce que j'en déduis**
@@ -216,27 +241,26 @@ de part féminine dans le CA = **+1.6 pts de marge globale** sans changer les co
 
 ---
 
-### Insight #3 — Le Q4 prouve qu'un return rate de 19% est atteignable — mais ça ne dure pas
+### Insight #3 — Aucun mois n'est épargné — même le meilleur reste préoccupant
 
 **Ce que j'ai vu**
 
 | Période | Return Rate | Marge Nette | Signal |
 |---|---|---|---|
-| Jan–Oct 2025 | ~28.5% 🟠 | ~43.8% | Niveau structurel |
-| **Nov 2025** | **19.3% 🟡** | **44.5%** | ⬇️ -9 pts |
-| **Déc 2025** | **18.8% 🟡** | **45.9% 🟡** | Record absolu |
-| Jan 2026 | 29.5% 🟠 | 43.9% | Retour à la normale |
+| **Oct 2025** | **24.6% 🟡** | **44.3%** | Meilleur mois — à la limite du seuil |
+| Moyenne période | 29.9% 🟠 | 43.3% | Niveau structurel |
+| **Fév 2025** | **37.5% 🔴** | **41.2%** | Pire mois — zone critique |
+| Mois > 25% | **11 / 14** | — | Aucune tendance baissière |
 
 **Ce que j'en déduis**
-En fin d'année, les acheteurs planifient leurs achats (cadeaux) et retournent moins.
-En janvier, les soldes attirent des achats impulsifs qui finissent retournés.
-La différence n'est pas dans le produit — elle est dans l'intention de l'acheteur.
-Décembre 2025 prouve que **45.9% de marge nette est atteignable**.
+Le return rate fluctue fortement (24.6% à 37.5%) sans pattern clair ni tendance
+à la baisse. Même le meilleur mois (octobre) est encore dans la zone "préoccupant".
+Il n'existe pas de "bon mois" — seulement des mois moins mauvais.
 
 **Ma recommandation**
-Reproduire le modèle Q4 hors saison : contenu éditorial informatif plutôt que
-promotionnel, ciblage d'audiences intentionnelles. Objectif : maintenir le return
-rate sous 22% toute l'année — pas seulement en Q4.
+Mettre en place un monitoring mensuel avec seuil d'alerte à 35%. Tout dépassement
+déclenche une analyse immédiate des SKUs concernés. Objectif atteignable : passer
+sous 25% de manière durable, comme le fait structurellement le Japon.
 
 ---
 
@@ -246,9 +270,9 @@ rate sous 22% toute l'année — pas seulement en Q4.
 
 | Mois | Email Return Rate | Tous canaux Return Rate |
 |---|---|---|
-| Jan 2025 | **100% ☠️** | 29.5% 🟠 |
-| Fév–Déc 2025 | 0–37.5% 🟡 / 🟠 | 19–33% 🟡 / 🟠 |
-| **Jan 2026** | **55.6% ☠️** | 29.5% 🟠 |
+| Jan 2025 | **100% ☠️** | 29.1% 🟠 |
+| Fév–Déc 2025 | 0–37.5% 🟡/🟠 | 24–37% |
+| **Jan 2026** | **55.6% ☠️** | 29.4% 🟠 |
 
 **Ce que j'en déduis**
 Deux années consécutives, même canal, même mois, même résultat.
@@ -270,22 +294,20 @@ de retour (rappel produit, recommandation personnalisée).
 | Métrique | Chine | Moyenne Globale |
 |---|---|---|
 | Part du CA total | **42%** | — |
-| Commandes jan 2025 | 30 | — |
-| Commandes fév 2026 | 79 (+163%) | — |
-| Return Rate moyen | **~28% 🟠** | ~28% 🟠 |
+| Return Rate moyen | **~28% 🟠** | ~30% 🟠 |
 | Return Rate min | 18.4% 🟡 (sep 2025) | — |
 | Return Rate max | 43.7% 🔴 (jan 2025) | — |
 | Amélioration sur 14 mois | **Aucune** | — |
 
 **Ce que j'en déduis**
-42% du CA dans un seul marché est un risque de concentration. Et ce marché a un
-return rate élevé et instable qu'on ne maîtrise pas. Cause probable : les standards
-de taille occidentaux ne correspondent pas bien aux morphologies asiatiques.
+42% du CA concentré sur un seul marché est un risque structurel. Ce marché a un
+return rate instable et non amélioré. Cause probable : inadéquation des standards
+de taille occidentaux avec les morphologies asiatiques.
 
 **Ma recommandation**
-Adapter les fiches produits pour le marché chinois en priorité : guide des tailles
+Localiser les fiches produits pour le marché chinois en priorité : guide des tailles
 en mandarin, correspondance avec les standards chinois. Chaque point de return rate
-récupéré sur ce marché = **~$150/mois d'économie directe** à partir du volume actuel.
+récupéré sur ce marché = **~$150/mois d'économie directe** au volume actuel.
 
 ---
 
@@ -293,52 +315,49 @@ récupéré sur ce marché = **~$150/mois d'économie directe** à partir du vol
 
 **Ce que j'ai vu**
 
-| Marché | Return Rate | vs Moyenne Globale | Durée |
+| Marché | Return Rate | vs Moyenne | Durée |
 |---|---|---|---|
-| 🇯🇵 Japon | **~15% 🟢** | -13 pts | Constant sur 14 mois |
-| 🇧🇷 Brésil (nov 2025) | **10.7% 🟢** | -17 pts | 1 mois |
-| 🇧🇷 Brésil (déc 2025) | **4.6% 🟢** | -23 pts | Record absolu du dataset |
+| 🇯🇵 Japon | **~15% 🟢** | -15 pts | Constant sur 14 mois |
+| 🇧🇷 Brésil (nov 2025) | **10.7% 🟢** | -19 pts | 1 mois |
+| 🇧🇷 Brésil (déc 2025) | **4.6% 🟢** | -25 pts | Record absolu du dataset |
 | 🇧🇷 Brésil (jan 2026) | 28.1% 🟠 | — | Retour à la normale |
 
 **Ce que j'en déduis**
-Ces deux cas prouvent qu'un return rate bien inférieur à 28% est possible —
-ce n'est pas une utopie. Le Japon le montre structurellement. Le Brésil en Q4
-le montre ponctuellement, sans qu'on ait identifié la cause.
+Un return rate structurellement bas n'est pas une utopie — le Japon le prouve
+sur 14 mois consécutifs. Le Brésil en Q4 montre qu'un retour à 4.6% est
+physiquement possible, sans qu'on ait encore identifié la cause.
 
 **Ma recommandation**
-- **Japon** : tester une activation (page produit en japonais, campagne Search ciblée).
-  Si le comportement se confirme à plus grande échelle, c'est un marché prioritaire
-  pour sa qualité, pas son volume.
-- **Brésil Q4** : identifier ce qui a changé en nov-déc 2025 et le répliquer sur
-  les autres marchés. C'est le blueprint anti-retours le plus précieux du dataset.
+- **Japon** : tester une activation ciblée (page produit en japonais, campagne Search)
+- **Brésil Q4** : investiguer ce qui a changé en nov-déc 2025 et le répliquer.
+  C'est le blueprint anti-retours le plus précieux du dataset.
 
 ---
 
-## 4. 📁 Structure du Repository
+## 4. 📁 Structure du repository
 
 ```
 thelook-ecommerce-audit/
 │
 ├── sql/
-│   ├── 01_main_monthly.sql         # KPIs financiers par pays / mois (requête principale)
+│   ├── 01_main_monthly.sql         # Requête principale multi-CTE (mois × pays)
 │   ├── 02_returns_impact.sql       # Impact des retours sur la marge nette
 │   ├── 03_gender_margin.sql        # Segmentation femmes / hommes
-│   ├── 04_seasonality.sql          # Saisonnalité Q4 — return rate & marge
-│   ├── 05_email_january.sql        # Analyse canal Email en janvier
+│   ├── 04_return_variability.sql   # Variabilité mensuelle du return rate
+│   ├── 05_email_january.sql        # Canal Email en janvier
 │   ├── 06_china_focus.sql          # Focus marché chinois
 │   └── 07_japan_brazil.sql         # Marchés à fort potentiel anti-retours
-│
 │
 └── README.md
 ```
 
 ---
 
+
 ## 6. 🧰 Stack Technique
 
 ![BigQuery](https://img.shields.io/badge/BigQuery-4285F4?style=flat&logo=google-cloud&logoColor=white)
-![Google Sheets](https://img.shields.io/badge/Google%20Sheets-34A853?style=flat&logo=google-sheets&logoColor=white)
-![SQL](https://img.shields.io/badge/SQL-CTE%20Architecture-blue?style=flat)
+![SQL](https://img.shields.io/badge/SQL-blue?style=flat)
 
 ---
 
